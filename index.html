@@ -479,7 +479,9 @@ createApp({
         const clearSelection = () => selectedGids.value.clear()
 
         const methodForAction = (action, task) => {
-            if (action === 'remove' && (currentTab.value === 'stopped' || ['complete', 'error', 'removed'].includes(task.status))) return 'removeDownloadResult'
+            if (action !== 'remove') return action
+            if (['active', 'waiting', 'paused'].includes(task.status)) return 'remove'
+            if (['complete', 'error', 'removed'].includes(task.status)) return 'removeDownloadResult'
             return action
         }
         const sendAction = (action, task) => {

@@ -138,6 +138,7 @@
                             <div class="flex shrink-0 items-center gap-1" @click.stop>
                                 <button v-if="task.status === 'active'" @click="sendAction('pause', task)" class="rounded-md p-2 text-amber transition hover:bg-amber/10" title="暂停"><i class="ri-pause-line"></i></button>
                                 <button v-if="['paused', 'waiting'].includes(task.status)" @click="sendAction('unpause', task)" class="rounded-md p-2 text-mint transition hover:bg-mint/10" title="开始"><i class="ri-play-line"></i></button>
+                                <button v-if="task.status === 'error'" @click="retryTask(task)" :disabled="!canRetryTask(task)" class="rounded-md p-2 text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:text-slate-600 disabled:hover:bg-transparent" :title="canRetryTask(task) ? '重试' : '缺少原始链接，无法直接重试'"><i class="ri-restart-line"></i></button>
                                 <button @click="sendAction('remove', task)" class="rounded-md p-2 text-danger transition hover:bg-danger/10" title="删除"><i class="ri-delete-bin-line"></i></button>
                             </div>
                         </div>
@@ -156,7 +157,7 @@
                             <div class="flex flex-wrap items-center gap-2">
                                 <span v-if="task.status === 'active'" class="font-mono text-mint"><i class="ri-speed-up-line mr-1"></i>{{ formatSize(task.downloadSpeed) }}/s</span>
                                 <span v-if="task.uploadSpeed > 0" class="font-mono text-sky-300"><i class="ri-upload-line mr-1"></i>{{ formatSize(task.uploadSpeed) }}/s</span>
-                                <span v-if="task.status === 'error'" class="rounded-md bg-danger/15 px-2 py-1 text-danger">错误 {{ task.errorCode || '-' }}</span>
+                                <span v-if="task.status === 'error'" class="max-w-full truncate rounded-md bg-danger/15 px-2 py-1 text-danger" :title="task.errorMessage || ''">错误 {{ task.errorCode || '-' }}{{ task.errorMessage ? `：${task.errorMessage}` : '' }}</span>
                                 <span class="rounded-md px-2 py-1 text-[11px] font-medium" :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
                             </div>
                         </div>
@@ -173,6 +174,7 @@
                 <div class="h-6 w-px bg-slate-700"></div>
                 <button v-if="currentTab !== 'stopped'" @click="executeBatch('unpause')" class="rounded-md px-2 py-1 text-sm text-mint transition hover:bg-mint/10"><i class="ri-play-circle-line mr-1"></i>开始</button>
                 <button v-if="currentTab !== 'stopped'" @click="executeBatch('pause')" class="rounded-md px-2 py-1 text-sm text-amber transition hover:bg-amber/10"><i class="ri-pause-circle-line mr-1"></i>暂停</button>
+                <button v-if="selectedRetryableTasks.length > 0" @click="retrySelectedTasks" class="rounded-md px-2 py-1 text-sm text-primary transition hover:bg-primary/10"><i class="ri-restart-line mr-1"></i>重试</button>
                 <button @click="executeBatch('remove')" class="rounded-md px-2 py-1 text-sm text-danger transition hover:bg-danger/10"><i class="ri-delete-bin-line mr-1"></i>删除</button>
                 <button @click="clearSelection" class="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-800 hover:text-slate-100" title="清除选择"><i class="ri-close-line"></i></button>
             </div>
@@ -335,6 +337,9 @@ createApp({
         })
         const canSubmit = computed(() => addMode.value === 'url' ? newUris.value.trim().length > 0 : selectedFiles.value.length > 0)
         const isAllSelected = computed(() => visibleList.value.length > 0 && visibleList.value.every(task => selectedGids.value.has(task.gid)))
+        const allTasks = computed(() => [...activeTasks.value, ...waitingTasks.value, ...stoppedTasks.value])
+        const selectedTasks = computed(() => allTasks.value.filter(task => selectedGids.value.has(task.gid)))
+        const selectedRetryableTasks = computed(() => selectedTasks.value.filter(canRetryTask))
 
         const notify = (message, type = 'ok') => {
             toast.value = { message, type }
@@ -450,7 +455,7 @@ createApp({
                 pruneSelection()
             } else if (data.id === 'sys_version' && data.result) {
                 version.value = data.result.version || ''
-            } else if (['task_action', 'batch_action', 'task_add'].includes(data.id)) {
+            } else if (['task_action', 'batch_action', 'task_add', 'task_retry'].includes(data.id)) {
                 sendPollRequest()
             }
         }
@@ -490,10 +495,10 @@ createApp({
         }
         const executeBatch = (action) => {
             if (selectedGids.value.size === 0) return
-            const selectedTasks = [...activeTasks.value, ...waitingTasks.value, ...stoppedTasks.value].filter(task => selectedGids.value.has(task.gid))
+            const tasks = selectedTasks.value
             const actionName = action === 'remove' ? '删除' : action === 'pause' ? '暂停' : '开始'
-            if (!window.confirm(`确定${actionName}选中的 ${selectedTasks.length} 个任务？`)) return
-            const calls = selectedTasks.map(task => ({
+            if (!window.confirm(`确定${actionName}选中的 ${tasks.length} 个任务？`)) return
+            const calls = tasks.map(task => ({
                 methodName: `aria2.${methodForAction(action, task)}`,
                 params: buildParams([task.gid])
             }))
@@ -501,6 +506,54 @@ createApp({
                 socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'batch_action', method: 'system.multicall', params: [calls] }))
                 selectedGids.value.clear()
                 notify('批量操作已发送')
+            }
+        }
+
+        const getRetryUris = (task) => {
+            const uris = []
+            ;(task.files || []).forEach(file => {
+                ;(file.uris || []).forEach(item => {
+                    if (item && item.uri && !uris.includes(item.uri)) uris.push(item.uri)
+                })
+            })
+            return uris
+        }
+        const getRetryOptions = (task) => {
+            const options = {}
+            if (task.dir) options.dir = task.dir
+            const file = task.files && task.files[0]
+            if (file && file.path && getRetryUris(task).length === 1) {
+                const normalized = file.path.replace(/\\/g, '/')
+                const filename = normalized.split('/').filter(Boolean).pop()
+                if (filename) options.out = filename
+            }
+            return options
+        }
+        const canRetryTask = (task) => task && task.status === 'error' && getRetryUris(task).length > 0
+        const retryTask = (task) => {
+            if (!canRetryTask(task)) {
+                notify('此任务没有可复用的原始链接，请重新新建下载', 'error')
+                return
+            }
+            if (sendRpc('addUri', [getRetryUris(task), getRetryOptions(task)], 'task_retry')) {
+                notify(`已重新提交「${getTaskName(task)}」`)
+            }
+        }
+        const retrySelectedTasks = () => {
+            const tasks = selectedRetryableTasks.value
+            if (!tasks.length) return notify('选中任务中没有可重试的错误任务', 'error')
+            const skipped = selectedTasks.value.length - tasks.length
+            if (!window.confirm(`确定重试选中的 ${tasks.length} 个错误任务？${skipped > 0 ? `（将跳过 ${skipped} 个不可重试任务）` : ''}`)) return
+            const calls = tasks.map(task => ({
+                methodName: 'aria2.addUri',
+                params: buildParams([getRetryUris(task), getRetryOptions(task)])
+            }))
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'task_retry', method: 'system.multicall', params: [calls] }))
+                selectedGids.value.clear()
+                notify('重试任务已提交')
+            } else {
+                notify('RPC 未连接，操作未发送', 'error')
             }
         }
 
@@ -649,9 +702,9 @@ createApp({
             config, connected, connecting, version, lastError, statusText, globalStat,
             activeTasks, waitingTasks, stoppedTasks, currentTab, tabs, currentList, visibleList,
             searchKeyword, selectedGids, showAddModal, showSettings, addMode, newUris, selectedFiles,
-            taskOptions, toast, rpcEndpoint, canSubmit, isAllSelected,
+            taskOptions, toast, rpcEndpoint, canSubmit, isAllSelected, selectedRetryableTasks,
             switchTab, toggleSelection, toggleSelectAll, clearSelection, openAddModal, closeAddModal,
-            sendAction, executeBatch, executeAddTask, handleFileSelect, saveAndReconnect, manualRefresh,
+            sendAction, executeBatch, canRetryTask, retryTask, retrySelectedTasks, executeAddTask, handleFileSelect, saveAndReconnect, manualRefresh,
             formatSize, getProgress, getEta, getTaskName, statusLabel, statusClass, progressClass
         }
     }

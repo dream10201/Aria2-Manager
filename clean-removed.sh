@@ -25,6 +25,10 @@ CLEAN_ON_ERROR="${ARIA2_CLEAN_ON_ERROR:-1}"
 # 需要把 on-download-complete 也指向本脚本。
 CLEAN_ON_COMPLETE_CONTROL="${ARIA2_CLEAN_ON_COMPLETE_CONTROL:-1}"
 
+# 1 = 下载完成后自动从 aria2 已停止列表删除记录。
+# 错误、被移除、未完成任务不会删除记录。
+REMOVE_COMPLETED_RECORD="${ARIA2_REMOVE_COMPLETED_RECORD:-1}"
+
 # 1 = 删除 BT 中未 selected 但实际写入过数据的文件
 DELETE_TOUCHED_UNSELECTED="${ARIA2_CLEAN_DELETE_TOUCHED_UNSELECTED:-1}"
 
@@ -231,6 +235,46 @@ rpc_tell_status() {
         "$RPC_URL"
 }
 
+rpc_remove_download_result() {
+    local gid="$1"
+    local payload
+
+    payload="$(
+        jq -nc \
+            --arg gid "$gid" \
+            --arg secret "$RPC_SECRET" '
+            {
+              jsonrpc: "2.0",
+              id: "clean-removed",
+              method: "aria2.removeDownloadResult",
+              params:
+                (
+                  (
+                    if $secret != "" then
+                      ["token:" + $secret]
+                    else
+                      []
+                    end
+                  )
+                  +
+                  [
+                    $gid
+                  ]
+                )
+            }
+            '
+    )"
+
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        --header 'Content-Type: application/json' \
+        --data "$payload" \
+        "$RPC_URL"
+}
+
 add_candidate() {
     local path="$1"
 
@@ -287,8 +331,9 @@ main() {
 
     local control_only=0
 
-    if [[ "$status" == "complete" && "$CLEAN_ON_COMPLETE_CONTROL" == "1" ]]; then
-        control_only=1
+    if [[ "$status" == "complete" ]]; then
+        [[ "$CLEAN_ON_COMPLETE_CONTROL" == "1" ]] && control_only=1
+        [[ "$control_only" == "1" || "$REMOVE_COMPLETED_RECORD" == "1" ]] || skip "status=$status gid=$gid"
     elif [[ "$status" != "removed" ]] && [[ ! ( "$status" == "error" && "$CLEAN_ON_ERROR" == "1" ) ]]; then
         skip "status=$status gid=$gid"
     fi
@@ -366,15 +411,30 @@ main() {
         add_candidate "${base_dir%/}/${info_hash^^}.torrent"
     fi
 
-    ((${#CANDIDATES[@]} > 0)) || skip "no deletion candidates gid=$gid"
+    if ((${#CANDIDATES[@]} > 0)); then
+        for p in "${CANDIDATES[@]}"; do
+            delete_file_like "$p"
+        done
 
-    for p in "${CANDIDATES[@]}"; do
-        delete_file_like "$p"
-    done
+        for p in "${DELETED_DIRS[@]:-}"; do
+            prune_empty_dir_upward "$p"
+        done
+    else
+        log "NO_CANDIDATES gid=$gid"
+    fi
 
-    for p in "${DELETED_DIRS[@]:-}"; do
-        prune_empty_dir_upward "$p"
-    done
+    if [[ "$status" == "complete" && "$REMOVE_COMPLETED_RECORD" == "1" ]]; then
+        local remove_resp
+        if remove_resp="$(rpc_remove_download_result "$gid")"; then
+            if jq -e '.error? != null' >/dev/null <<< "$remove_resp"; then
+                log "WARN removeDownloadResult failed gid=$gid: $(jq -rc '.error' <<< "$remove_resp")"
+            else
+                log "REMOVE_RECORD gid=$gid"
+            fi
+        else
+            log "WARN removeDownloadResult rpc failed gid=$gid"
+        fi
+    fi
 
     log "DONE gid=$gid status=$status mode=$([[ "$control_only" == "1" ]] && printf control-only || printf cleanup) candidates=${#CANDIDATES[@]} completed=$completed total=$total"
 }

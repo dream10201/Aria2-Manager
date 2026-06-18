@@ -570,11 +570,23 @@ createApp({
             if (taskOptions.value.pause) options.pause = 'true'
             return options
         }
+        const normalizeUriInput = (uri) => {
+            const value = uri.trim()
+            if (/^[a-f0-9]{40}$/i.test(value) || /^[a-z2-7]{32}$/i.test(value)) {
+                return `magnet:?xt=urn:btih:${value}`
+            }
+            if (/^magnet:/i.test(value) || /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value
+            if (/^\/\//.test(value)) return `https:${value}`
+            if (/^(localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\]|(?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#].*)?$/i.test(value)) {
+                return `https://${value}`
+            }
+            return value
+        }
         const executeAddTask = () => {
             if (!canSubmit.value) return
             const options = getAria2Options()
             if (addMode.value === 'url') {
-                const uris = newUris.value.split(/\r?\n/).map(uri => uri.trim()).filter(Boolean)
+                const uris = newUris.value.split(/\r?\n/).map(normalizeUriInput).filter(Boolean)
                 let optionWarning = false
                 if (uris.length > 1 && options.out) {
                     delete options.out

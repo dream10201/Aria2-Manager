@@ -38,11 +38,12 @@
         .fade-slide-enter-from, .fade-slide-leave-to { opacity: 0; transform: translateY(8px); }
         .modal-enter-active, .modal-leave-active { transition: opacity .16s ease; }
         .modal-enter-from, .modal-leave-to { opacity: 0; }
+        select option { background: #182232; }
     </style>
 </head>
 <body class="min-h-screen text-slate-200 selection:bg-primary selection:text-white">
 <div id="app" v-cloak class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-    <header class="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <header class="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div class="flex min-w-0 items-center gap-3">
             <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-600/60 bg-panel2 shadow-lg shadow-black/20" :class="connected ? 'text-mint' : 'text-danger'">
                 <i class="ri-download-cloud-2-line text-2xl"></i>
@@ -54,28 +55,29 @@
                         <i class="ri-circle-fill mr-1 text-[8px] align-middle"></i>{{ statusText }}
                     </span>
                     <span v-if="version" class="font-mono">aria2 v{{ version }}</span>
-                    <span class="font-mono">{{ rpcEndpoint }}</span>
+                    <span class="hidden font-mono sm:inline">{{ rpcEndpoint }}</span>
                 </div>
             </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4 md:w-auto">
-            <div class="rounded-lg border border-line/70 bg-panel px-3 py-2">
-                <div class="text-[11px] uppercase text-slate-500">下载</div>
+        <div class="flex flex-wrap items-stretch gap-2">
+            <div class="relative w-36 overflow-hidden rounded-lg border border-line/70 bg-panel px-3 py-2">
+                <svg v-if="sparklinePoints" class="pointer-events-none absolute inset-x-0 bottom-0 h-8 w-full opacity-40" viewBox="0 0 100 28" preserveAspectRatio="none">
+                    <polyline :points="sparklinePoints" fill="none" stroke="#2dd4bf" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+                </svg>
+                <div class="text-[11px] uppercase text-slate-500">下载 <span v-if="globalLimits.download" class="text-amber" title="全局下载限速">限 {{ globalLimits.download }}</span></div>
                 <div class="mt-0.5 font-mono text-base font-semibold text-mint">{{ formatSize(globalStat.downloadSpeed) }}/s</div>
             </div>
-            <div class="rounded-lg border border-line/70 bg-panel px-3 py-2">
-                <div class="text-[11px] uppercase text-slate-500">上传</div>
+            <div class="w-36 rounded-lg border border-line/70 bg-panel px-3 py-2">
+                <div class="text-[11px] uppercase text-slate-500">上传 <span v-if="globalLimits.upload" class="text-amber" title="全局上传限速">限 {{ globalLimits.upload }}</span></div>
                 <div class="mt-0.5 font-mono text-base font-semibold text-sky-300">{{ formatSize(globalStat.uploadSpeed) }}/s</div>
             </div>
-            <button @click="manualRefresh" :disabled="!connected" class="rounded-lg border border-line/70 bg-panel px-3 py-2 text-left transition hover:bg-panel2 disabled:cursor-not-allowed disabled:opacity-50" title="刷新任务">
-                <div class="text-[11px] uppercase text-slate-500">刷新</div>
-                <div class="mt-0.5 flex items-center gap-2 text-sm font-medium text-slate-100"><i class="ri-refresh-line"></i>立即</div>
-            </button>
-            <button @click="showSettings = true" class="rounded-lg border border-line/70 bg-panel px-3 py-2 text-left transition hover:bg-panel2" title="服务器设置">
-                <div class="text-[11px] uppercase text-slate-500">RPC</div>
-                <div class="mt-0.5 flex items-center gap-2 text-sm font-medium text-slate-100"><i class="ri-settings-3-line"></i>设置</div>
-            </button>
+            <div class="flex items-center gap-1 rounded-lg border border-line/70 bg-panel px-2">
+                <button @click="globalAction('unpauseAll', '恢复全部任务？')" :disabled="!connected" class="rounded-md p-2 text-mint transition hover:bg-mint/10 disabled:cursor-not-allowed disabled:opacity-40" title="全部开始"><i class="ri-play-circle-line text-lg"></i></button>
+                <button @click="globalAction('pauseAll', '暂停全部任务？')" :disabled="!connected" class="rounded-md p-2 text-amber transition hover:bg-amber/10 disabled:cursor-not-allowed disabled:opacity-40" title="全部暂停"><i class="ri-pause-circle-line text-lg"></i></button>
+                <button @click="manualRefresh" :disabled="!connected" class="rounded-md p-2 text-slate-300 transition hover:bg-panel2 disabled:cursor-not-allowed disabled:opacity-40" title="立即刷新"><i class="ri-refresh-line text-lg"></i></button>
+                <button @click="openSettings" class="rounded-md p-2 text-slate-300 transition hover:bg-panel2" title="服务器设置"><i class="ri-settings-3-line text-lg"></i></button>
+            </div>
         </div>
     </header>
 
@@ -91,10 +93,17 @@
     <div class="mb-4 flex flex-col gap-3 rounded-lg border border-line/70 bg-panel p-3 md:flex-row md:items-center">
         <div class="relative flex-1">
             <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
-            <input v-model.trim="searchKeyword" type="search" placeholder="搜索任务名、目录或 GID" class="h-10 w-full rounded-lg border border-line bg-ink pl-9 pr-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-primary">
+            <input id="searchInput" v-model.trim="searchKeyword" type="search" placeholder="搜索任务名、目录或 GID（快捷键 /）" class="h-10 w-full rounded-lg border border-line bg-ink pl-9 pr-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-primary">
         </div>
-        <div class="flex items-center gap-2">
-            <button @click="toggleSelectAll" :disabled="visibleList.length === 0" class="h-10 rounded-lg border border-line px-3 text-sm text-slate-300 transition hover:bg-panel2 disabled:cursor-not-allowed disabled:opacity-50">
+        <div class="flex flex-wrap items-center gap-2">
+            <select v-model="sortMode" class="h-10 rounded-lg border border-line bg-ink px-2 text-sm text-slate-300 outline-none focus:border-primary" title="排序方式">
+                <option value="default">默认排序</option>
+                <option value="name">按名称</option>
+                <option value="size">按大小</option>
+                <option value="progress">按进度</option>
+                <option value="speed">按速度</option>
+            </select>
+            <button @click="toggleSelectAll" :disabled="displayList.length === 0" class="h-10 rounded-lg border border-line px-3 text-sm text-slate-300 transition hover:bg-panel2 disabled:cursor-not-allowed disabled:opacity-50">
                 <i :class="isAllSelected ? 'ri-checkbox-circle-fill text-primary' : 'ri-checkbox-blank-circle-line'" class="mr-1"></i>{{ isAllSelected ? '取消全选' : '全选' }}
             </button>
             <button @click="openAddModal" class="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-white shadow-lg shadow-blue-950/30 transition hover:bg-blue-600">
@@ -103,26 +112,38 @@
         </div>
     </div>
 
+    <div v-if="currentTab === 'stopped' && stoppedTasks.length > 0" class="mb-3 flex flex-wrap items-center gap-2">
+        <button v-for="chip in stoppedChips" :key="chip.key" @click="stoppedFilter = chip.key" class="rounded-full border px-3 py-1 text-xs transition" :class="stoppedFilter === chip.key ? 'border-primary bg-primary/15 text-white' : 'border-line/70 bg-panel text-slate-400 hover:text-slate-100'">
+            {{ chip.label }} <span class="font-mono">{{ chip.count }}</span>
+        </button>
+        <div class="flex-1"></div>
+        <button @click="purgeStopped" class="rounded-full border border-line/70 bg-panel px-3 py-1 text-xs text-slate-400 transition hover:border-danger/60 hover:text-danger">
+            <i class="ri-eraser-line mr-1"></i>清除全部记录
+        </button>
+    </div>
+
     <main class="flex-1">
         <div v-if="!connected" class="rounded-lg border border-danger/40 bg-danger/10 px-4 py-12 text-center">
             <i class="ri-wifi-off-line mb-3 block text-4xl text-danger/80"></i>
             <div class="font-medium text-slate-100">无法连接 aria2 RPC</div>
             <div class="mt-1 text-sm text-slate-400">{{ lastError || '正在自动重连，确认 aria2 已启用 --enable-rpc。' }}</div>
+            <button @click="openSettings" class="mt-4 rounded-lg border border-line px-4 py-2 text-sm text-slate-300 transition hover:bg-panel2"><i class="ri-settings-3-line mr-1"></i>检查连接设置</button>
         </div>
 
         <div v-else-if="currentList.length === 0" class="rounded-lg border border-dashed border-line bg-panel px-4 py-16 text-center">
             <i class="ri-inbox-line mb-3 block text-4xl text-slate-600"></i>
             <div class="font-medium text-slate-300">当前分类没有任务</div>
+            <button @click="openAddModal" class="mt-3 text-sm text-primary hover:text-blue-300"><i class="ri-add-line mr-1"></i>新建下载</button>
         </div>
 
-        <div v-else-if="visibleList.length === 0" class="rounded-lg border border-dashed border-line bg-panel px-4 py-16 text-center">
+        <div v-else-if="displayList.length === 0" class="rounded-lg border border-dashed border-line bg-panel px-4 py-16 text-center">
             <i class="ri-search-eye-line mb-3 block text-4xl text-slate-600"></i>
             <div class="font-medium text-slate-300">没有匹配的任务</div>
             <button @click="searchKeyword = ''" class="mt-3 text-sm text-primary hover:text-blue-300">清空搜索</button>
         </div>
 
         <div v-else class="space-y-3">
-            <article v-for="task in visibleList" :key="task.gid" @click="toggleSelection(task.gid)" class="group rounded-lg border bg-panel p-4 transition hover:bg-panel2" :class="selectedGids.has(task.gid) ? 'border-primary ring-1 ring-primary/40' : 'border-line/70 hover:border-slate-500'">
+            <article v-for="task in displayList" :key="task.gid" @click="toggleSelection(task.gid)" class="group rounded-lg border bg-panel p-4 transition hover:bg-panel2" :class="selectedGids.has(task.gid) ? 'border-primary ring-1 ring-primary/40' : 'border-line/70 hover:border-slate-500'">
                 <div class="flex items-start gap-3">
                     <button class="mt-0.5 text-xl" :title="selectedGids.has(task.gid) ? '取消选择' : '选择任务'">
                         <i :class="selectedGids.has(task.gid) ? 'ri-checkbox-circle-fill text-primary' : 'ri-checkbox-blank-circle-line text-slate-500 group-hover:text-slate-300'"></i>
@@ -139,7 +160,9 @@
                                 <button v-if="task.status === 'active'" @click="sendAction('pause', task)" class="rounded-md p-2 text-amber transition hover:bg-amber/10" title="暂停"><i class="ri-pause-line"></i></button>
                                 <button v-if="['paused', 'waiting'].includes(task.status)" @click="sendAction('unpause', task)" class="rounded-md p-2 text-mint transition hover:bg-mint/10" title="开始"><i class="ri-play-line"></i></button>
                                 <button v-if="task.status === 'error'" @click="retryTask(task)" :disabled="!canRetryTask(task)" class="rounded-md p-2 text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:text-slate-600 disabled:hover:bg-transparent" :title="canRetryTask(task) ? '重试' : '缺少原始链接，无法直接重试'"><i class="ri-restart-line"></i></button>
-                                <button @click="sendAction('remove', task)" class="rounded-md p-2 text-danger transition hover:bg-danger/10" title="删除"><i class="ri-delete-bin-line"></i></button>
+                                <button v-if="getTaskLink(task)" @click="copyText(getTaskLink(task), '链接')" class="rounded-md p-2 text-slate-400 transition hover:bg-panel2 hover:text-slate-100" title="复制下载链接"><i class="ri-link"></i></button>
+                                <button @click="openDetail(task)" class="rounded-md p-2 text-slate-400 transition hover:bg-panel2 hover:text-slate-100" title="任务详情"><i class="ri-information-line"></i></button>
+                                <button @click="sendAction('remove', task)" class="rounded-md p-2 text-danger transition hover:bg-danger/10" :title="isStoppedStatus(task.status) ? '删除记录' : '删除任务'"><i class="ri-delete-bin-line"></i></button>
                             </div>
                         </div>
 
@@ -152,12 +175,14 @@
                                 <span><i class="ri-hard-drive-2-line mr-1"></i>{{ formatSize(task.completedLength) }} / {{ formatSize(task.totalLength) }}</span>
                                 <span><i class="ri-percent-line mr-1"></i>{{ getProgress(task) }}%</span>
                                 <span v-if="task.status === 'active'"><i class="ri-time-line mr-1"></i>{{ getEta(task) }}</span>
-                                <span v-if="task.connections"><i class="ri-links-line mr-1"></i>{{ task.connections }} 连接</span>
+                                <span v-if="task.connections > 0"><i class="ri-links-line mr-1"></i>{{ task.connections }} 连接</span>
+                                <span v-if="task.bittorrent && Number(task.numSeeders) > 0"><i class="ri-seedling-line mr-1"></i>{{ task.numSeeders }} 做种</span>
                             </div>
                             <div class="flex flex-wrap items-center gap-2">
                                 <span v-if="task.status === 'active'" class="font-mono text-mint"><i class="ri-speed-up-line mr-1"></i>{{ formatSize(task.downloadSpeed) }}/s</span>
                                 <span v-if="task.uploadSpeed > 0" class="font-mono text-sky-300"><i class="ri-upload-line mr-1"></i>{{ formatSize(task.uploadSpeed) }}/s</span>
                                 <span v-if="task.status === 'error'" class="max-w-full truncate rounded-md bg-danger/15 px-2 py-1 text-danger" :title="task.errorMessage || ''">错误 {{ task.errorCode || '-' }}{{ task.errorMessage ? `：${task.errorMessage}` : '' }}</span>
+                                <span v-if="task.status === 'active' && task.seeder === 'true'" class="rounded-md bg-sky-500/15 px-2 py-1 text-[11px] font-medium text-sky-300">做种中</span>
                                 <span class="rounded-md px-2 py-1 text-[11px] font-medium" :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
                             </div>
                         </div>
@@ -182,7 +207,7 @@
     </transition>
 
     <transition name="fade-slide">
-        <div v-if="toast.message" class="fixed right-4 top-4 z-[60] max-w-sm rounded-lg border px-4 py-3 shadow-xl" :class="toast.type === 'error' ? 'border-danger/40 bg-danger/15 text-red-100' : 'border-mint/40 bg-mint/15 text-emerald-100'">
+        <div v-if="toast.message" class="fixed right-4 top-4 z-[70] max-w-sm rounded-lg border px-4 py-3 shadow-xl" :class="toast.type === 'error' ? 'border-danger/40 bg-danger/15 text-red-100' : 'border-mint/40 bg-mint/15 text-emerald-100'">
             <div class="flex items-start gap-2 text-sm">
                 <i :class="toast.type === 'error' ? 'ri-error-warning-line text-danger' : 'ri-checkbox-circle-line text-mint'" class="mt-0.5"></i>
                 <span>{{ toast.message }}</span>
@@ -199,29 +224,33 @@
                 </div>
                 <div class="mb-4 flex border-b border-line">
                     <button @click="addMode = 'url'" class="border-b-2 px-4 pb-2 text-sm font-medium transition" :class="addMode === 'url' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-100'">链接</button>
-                    <button @click="addMode = 'torrent'" class="border-b-2 px-4 pb-2 text-sm font-medium transition" :class="addMode === 'torrent' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-100'">种子</button>
+                    <button @click="addMode = 'torrent'" class="border-b-2 px-4 pb-2 text-sm font-medium transition" :class="addMode === 'torrent' ? 'border-primary text-primary' : 'border-transparent text-slate-400 hover:text-slate-100'">种子 / Metalink</button>
                 </div>
 
                 <div v-if="addMode === 'url'">
-                    <label class="mb-1 block text-xs text-slate-500">下载链接，每行一个</label>
+                    <label class="mb-1 block text-xs text-slate-500">下载链接，每行一个（支持 HTTP/FTP/磁力链接/BT InfoHash）</label>
                     <textarea v-model="newUris" class="h-36 w-full resize-none rounded-lg border border-line bg-ink p-3 font-mono text-sm outline-none focus:border-primary" placeholder="https://example.com/file.zip"></textarea>
                 </div>
 
                 <div v-else>
-                    <label class="mb-1 block text-xs text-slate-500">BT 种子文件</label>
-                    <label class="flex h-36 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-line bg-ink text-center transition hover:border-primary hover:bg-panel2">
-                        <input type="file" accept=".torrent,application/x-bittorrent" multiple @change="handleFileSelect" class="hidden">
+                    <label class="mb-1 block text-xs text-slate-500">BT 种子 / Metalink 文件</label>
+                    <label class="flex h-36 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed bg-ink text-center transition hover:border-primary hover:bg-panel2" :class="dragOver ? 'border-primary bg-panel2' : 'border-line'"
+                        @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop">
+                        <input type="file" accept=".torrent,.metalink,.meta4,application/x-bittorrent" multiple @change="handleFileSelect" class="hidden">
                         <i class="ri-file-upload-line mb-2 text-3xl text-slate-500"></i>
                         <span v-if="selectedFiles.length === 1" class="text-sm font-medium text-primary">{{ selectedFiles[0].name }}</span>
-                        <span v-else-if="selectedFiles.length > 1" class="text-sm font-medium text-primary">已选择 {{ selectedFiles.length }} 个种子文件</span>
-                        <span v-else class="text-sm text-slate-400">选择一个或多个 .torrent 文件</span>
+                        <span v-else-if="selectedFiles.length > 1" class="text-sm font-medium text-primary">已选择 {{ selectedFiles.length }} 个文件</span>
+                        <span v-else class="text-sm text-slate-400">点击选择或拖入 .torrent / .metalink 文件</span>
                     </label>
                 </div>
 
                 <div class="mt-4 grid gap-3 sm:grid-cols-2">
                     <div>
                         <label class="mb-1 block text-xs text-slate-500">保存目录</label>
-                        <input v-model.trim="taskOptions.dir" type="text" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" placeholder="/downloads">
+                        <input v-model.trim="taskOptions.dir" type="text" list="recentDirs" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" placeholder="/downloads">
+                        <datalist id="recentDirs">
+                            <option v-for="dir in recentDirs" :key="dir" :value="dir"></option>
+                        </datalist>
                     </div>
                     <div>
                         <label class="mb-1 block text-xs text-slate-500">文件名（仅链接任务常用）</label>
@@ -246,31 +275,145 @@
     </transition>
 
     <transition name="modal">
+        <div v-if="detailGid" class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" @click.self="closeDetail">
+            <div class="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-line bg-panel p-5 shadow-2xl">
+                <div class="mb-4 flex items-start justify-between gap-4">
+                    <h2 class="min-w-0 truncate text-lg font-semibold text-white" :title="detailTask ? getTaskName(detailTask) : ''">
+                        <i class="ri-file-info-line mr-2 text-primary"></i>{{ detailTask ? getTaskName(detailTask) : '加载中…' }}
+                    </h2>
+                    <button @click="closeDetail" class="shrink-0 rounded-md p-1.5 text-slate-500 hover:bg-panel2 hover:text-white" title="关闭"><i class="ri-close-line text-xl"></i></button>
+                </div>
+
+                <template v-if="detailTask">
+                    <div class="mb-3 h-2 overflow-hidden rounded-full bg-ink">
+                        <div class="h-full rounded-full transition-all duration-500" :class="progressClass(detailTask)" :style="{ width: getProgress(detailTask) + '%' }"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
+                        <div><span class="text-slate-500">状态：</span><span class="rounded px-1.5 py-0.5" :class="statusClass(detailTask.status)">{{ statusLabel(detailTask.status) }}</span></div>
+                        <div class="font-mono"><span class="text-slate-500">进度：</span>{{ getProgress(detailTask) }}%</div>
+                        <div class="font-mono"><span class="text-slate-500">大小：</span>{{ formatSize(detailTask.completedLength) }} / {{ formatSize(detailTask.totalLength) }}</div>
+                        <div class="font-mono"><span class="text-slate-500">下载：</span>{{ formatSize(detailTask.downloadSpeed) }}/s</div>
+                        <div class="font-mono"><span class="text-slate-500">上传：</span>{{ formatSize(detailTask.uploadSpeed) }}/s（共 {{ formatSize(detailTask.uploadLength) }}）</div>
+                        <div class="font-mono"><span class="text-slate-500">剩余：</span>{{ detailTask.status === 'active' ? getEta(detailTask) : '—' }}</div>
+                        <div class="font-mono"><span class="text-slate-500">连接：</span>{{ detailTask.connections || 0 }}<template v-if="detailTask.bittorrent">，做种 {{ detailTask.numSeeders || 0 }}</template></div>
+                        <div class="font-mono"><span class="text-slate-500">分片：</span>{{ detailTask.numPieces || '-' }} × {{ formatSize(detailTask.pieceLength) }}</div>
+                        <div class="cursor-pointer font-mono" @click="copyText(detailTask.gid, 'GID')" title="点击复制"><span class="text-slate-500">GID：</span>{{ detailTask.gid }} <i class="ri-file-copy-line text-slate-500"></i></div>
+                        <div class="col-span-2 cursor-pointer truncate font-mono sm:col-span-3" @click="copyText(detailTask.dir, '目录')" :title="detailTask.dir"><span class="text-slate-500">目录：</span>{{ detailTask.dir }} <i class="ri-file-copy-line text-slate-500"></i></div>
+                        <div v-if="detailTask.infoHash" class="col-span-2 cursor-pointer truncate font-mono sm:col-span-3" @click="copyText(`magnet:?xt=urn:btih:${detailTask.infoHash}`, '磁力链接')" title="点击复制磁力链接"><span class="text-slate-500">InfoHash：</span>{{ detailTask.infoHash }} <i class="ri-file-copy-line text-slate-500"></i></div>
+                        <div v-if="detailTask.status === 'error'" class="col-span-2 text-danger sm:col-span-3">错误 {{ detailTask.errorCode || '-' }}：{{ detailTask.errorMessage || '未知错误' }}</div>
+                    </div>
+
+                    <div v-if="!isStoppedStatus(detailTask.status)" class="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-line/70 bg-ink p-3">
+                        <span class="text-xs text-slate-500"><i class="ri-speed-mini-line mr-1"></i>任务限速</span>
+                        <input v-model.trim="detailLimit" type="text" placeholder="0 = 不限" class="h-8 w-28 rounded-md border border-line bg-panel px-2 font-mono text-xs outline-none focus:border-primary" title="支持 K/M 后缀，如 500K、2M；0 或留空为不限速">
+                        <button @click="applyDetailLimit" class="h-8 rounded-md bg-primary/20 px-3 text-xs text-blue-300 transition hover:bg-primary/30">应用</button>
+                        <span class="text-[11px] text-slate-600">支持 K/M 后缀，0 或留空为不限速</span>
+                    </div>
+
+                    <div v-if="detailFiles.length > 0" class="mt-4">
+                        <div class="mb-2 flex items-center justify-between text-xs text-slate-500">
+                            <span><i class="ri-folder-2-line mr-1"></i>文件（{{ detailFiles.length }}）</span>
+                            <span v-if="canEditFileSelection" class="text-slate-600">勾选需要下载的文件</span>
+                        </div>
+                        <div class="max-h-52 space-y-1 overflow-y-auto rounded-lg border border-line/70 bg-ink p-2">
+                            <div v-for="file in detailFiles" :key="file.index" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition hover:bg-panel" :class="file.selected === 'false' ? 'opacity-45' : ''">
+                                <input v-if="canEditFileSelection" type="checkbox" :checked="file.selected === 'true'" @change="toggleFileSelection(file)" class="shrink-0 rounded border-line bg-panel text-primary focus:ring-primary">
+                                <span class="min-w-0 flex-1 truncate font-mono" :title="file.path">{{ getFileName(file) }}</span>
+                                <span class="shrink-0 font-mono text-slate-500">{{ getFileProgress(file) }}%</span>
+                                <span class="shrink-0 font-mono text-slate-500">{{ formatSize(file.length) }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-if="detailUris.length > 0" class="mt-4">
+                        <div class="mb-2 text-xs text-slate-500"><i class="ri-link mr-1"></i>下载链接（{{ detailUris.length }}）</div>
+                        <div class="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-line/70 bg-ink p-2">
+                            <div v-for="(uri, index) in detailUris" :key="index" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition hover:bg-panel">
+                                <span class="min-w-0 flex-1 truncate font-mono" :title="uri">{{ uri }}</span>
+                                <button @click="copyText(uri, '链接')" class="shrink-0 text-slate-500 hover:text-slate-200" title="复制"><i class="ri-file-copy-line"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 flex flex-wrap justify-end gap-2">
+                        <button v-if="detailTask.status === 'active'" @click="sendAction('pause', detailTask)" class="rounded-lg border border-amber/40 px-3 py-2 text-sm text-amber transition hover:bg-amber/10"><i class="ri-pause-line mr-1"></i>暂停</button>
+                        <button v-if="['paused', 'waiting'].includes(detailTask.status)" @click="sendAction('unpause', detailTask)" class="rounded-lg border border-mint/40 px-3 py-2 text-sm text-mint transition hover:bg-mint/10"><i class="ri-play-line mr-1"></i>开始</button>
+                        <button v-if="detailTask.status === 'error' && canRetryTask(detailTask)" @click="retryTask(detailTask)" class="rounded-lg border border-primary/40 px-3 py-2 text-sm text-primary transition hover:bg-primary/10"><i class="ri-restart-line mr-1"></i>重试</button>
+                        <button @click="removeFromDetail" class="rounded-lg border border-danger/40 px-3 py-2 text-sm text-danger transition hover:bg-danger/10"><i class="ri-delete-bin-line mr-1"></i>{{ isStoppedStatus(detailTask.status) ? '删除记录' : '删除任务' }}</button>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </transition>
+
+    <transition name="modal">
         <div v-if="showSettings" class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" @click.self="showSettings = false">
-            <div class="w-full max-w-md rounded-lg border border-line bg-panel p-5 shadow-2xl">
+            <div class="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-lg border border-line bg-panel p-5 shadow-2xl">
                 <div class="mb-4 flex items-center justify-between gap-4">
-                    <h2 class="text-lg font-semibold text-white"><i class="ri-server-line mr-2 text-primary"></i>服务器设置</h2>
+                    <h2 class="text-lg font-semibold text-white"><i class="ri-server-line mr-2 text-primary"></i>设置</h2>
                     <button @click="showSettings = false" class="rounded-md p-1.5 text-slate-500 hover:bg-panel2 hover:text-white" title="关闭"><i class="ri-close-line text-xl"></i></button>
                 </div>
                 <div class="space-y-3">
-                    <div>
-                        <label class="mb-1 block text-xs text-slate-500">Host</label>
-                        <input v-model.trim="config.host" type="text" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" placeholder="localhost">
-                    </div>
-                    <div>
-                        <label class="mb-1 block text-xs text-slate-500">Port</label>
-                        <input v-model.trim="config.port" type="number" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" placeholder="6800">
+                    <div class="text-xs font-medium uppercase text-slate-500">RPC 连接</div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2">
+                            <label class="mb-1 block text-xs text-slate-500">Host</label>
+                            <input v-model.trim="config.host" type="text" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" placeholder="localhost">
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-slate-500">Port</label>
+                            <input v-model.trim="config.port" type="number" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" placeholder="6800">
+                        </div>
                     </div>
                     <div>
                         <label class="mb-1 block text-xs text-slate-500">RPC Secret</label>
                         <input v-model="config.secret" type="password" class="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm outline-none focus:border-primary" autocomplete="off">
                     </div>
-                    <label class="flex h-10 items-center gap-2 rounded-lg border border-line bg-ink px-3 text-sm text-slate-300">
-                        <input type="checkbox" v-model="config.ssl" class="rounded border-line bg-panel text-primary focus:ring-primary">
-                        使用 WSS
-                    </label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex h-10 items-center gap-2 rounded-lg border border-line bg-ink px-3 text-sm text-slate-300">
+                            <input type="checkbox" v-model="config.ssl" class="rounded border-line bg-panel text-primary focus:ring-primary">
+                            使用 WSS
+                        </label>
+                        <div class="flex h-10 items-center gap-2 rounded-lg border border-line bg-ink px-3 text-sm text-slate-300">
+                            <span class="whitespace-nowrap text-xs text-slate-500">刷新间隔</span>
+                            <select v-model.number="config.poll" class="flex-1 bg-transparent text-sm outline-none">
+                                <option :value="1">1 秒</option>
+                                <option :value="2">2 秒</option>
+                                <option :value="3">3 秒</option>
+                                <option :value="5">5 秒</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="pt-2 text-xs font-medium uppercase text-slate-500">全局限速<span class="ml-2 normal-case text-slate-600">支持 K/M 后缀，0 或留空为不限速</span></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="mb-1 block text-xs text-slate-500">下载限速</label>
+                            <input v-model.trim="limitForm.download" type="text" class="h-10 w-full rounded-lg border border-line bg-ink px-3 font-mono text-sm outline-none focus:border-primary" placeholder="如 10M">
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-slate-500">上传限速</label>
+                            <input v-model.trim="limitForm.upload" type="text" class="h-10 w-full rounded-lg border border-line bg-ink px-3 font-mono text-sm outline-none focus:border-primary" placeholder="如 1M">
+                        </div>
+                    </div>
                 </div>
                 <button @click="saveAndReconnect" class="mt-5 h-10 w-full rounded-lg bg-primary text-sm font-medium text-white transition hover:bg-blue-600">保存并重连</button>
+            </div>
+        </div>
+    </transition>
+
+    <transition name="modal">
+        <div v-if="confirmState.show" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" @click.self="resolveConfirm(false)">
+            <div class="w-full max-w-sm rounded-lg border border-line bg-panel p-5 shadow-2xl">
+                <div class="flex items-start gap-3">
+                    <i class="ri-question-line mt-0.5 text-xl text-amber"></i>
+                    <div class="min-w-0 flex-1 break-words text-sm text-slate-200">{{ confirmState.message }}</div>
+                </div>
+                <div class="mt-5 flex justify-end gap-3">
+                    <button @click="resolveConfirm(false)" class="rounded-lg px-4 py-2 text-sm text-slate-400 transition hover:bg-panel2 hover:text-white">取消</button>
+                    <button @click="resolveConfirm(true)" class="rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white transition hover:bg-red-600">确定</button>
+                </div>
             </div>
         </div>
     </transition>
@@ -286,7 +429,8 @@ createApp({
             host: storage.getItem('aria2_host') || location.hostname || 'localhost',
             port: storage.getItem('aria2_port') || '6800',
             secret: storage.getItem('aria2_secret') || '',
-            ssl: storage.getItem('aria2_ssl') === 'true'
+            ssl: storage.getItem('aria2_ssl') === 'true',
+            poll: Number(storage.getItem('aria2_poll')) || 1
         })
 
         const connected = ref(false)
@@ -295,26 +439,39 @@ createApp({
         const lastError = ref('')
         const statusText = ref('未连接')
         const globalStat = ref({ downloadSpeed: 0, uploadSpeed: 0, numActive: 0, numWaiting: 0, numStopped: 0 })
+        const globalLimits = ref({ download: '', upload: '' })
+        const limitForm = ref({ download: '', upload: '' })
+        const speedHistory = ref([])
         const activeTasks = ref([])
         const waitingTasks = ref([])
         const stoppedTasks = ref([])
 
         const currentTab = ref('active')
+        const stoppedFilter = ref('all')
         const searchKeyword = ref('')
+        const sortMode = ref('default')
         const selectedGids = ref(new Set())
         const showAddModal = ref(false)
         const showSettings = ref(false)
         const addMode = ref('url')
+        const dragOver = ref(false)
         const newUris = ref('')
         const selectedFiles = ref([])
+        const recentDirs = ref(JSON.parse(storage.getItem('aria2_recent_dirs') || '[]'))
         const taskOptions = ref({ dir: '', out: '', split: 5, pause: false })
         const toast = ref({ message: '', type: 'ok' })
+        const confirmState = ref({ show: false, message: '', resolve: null })
+
+        const detailGid = ref('')
+        const detailTask = ref(null)
+        const detailLimit = ref('')
 
         let socket = null
         let pollInterval = null
         let reconnectTimer = null
         let closingForReconnect = false
         const RECONNECT_DELAY = 3000
+        const HIDDEN_POLL_MS = 5000
 
         const rpcEndpoint = computed(() => `${config.value.ssl ? 'wss' : 'ws'}://${config.value.host || 'localhost'}:${config.value.port || '6800'}/jsonrpc`)
         const tabs = computed(() => [
@@ -322,10 +479,17 @@ createApp({
             { key: 'waiting', label: '等待中', count: waitingTasks.value.length },
             { key: 'stopped', label: '已停止', count: stoppedTasks.value.length }
         ])
+        const stoppedChips = computed(() => [
+            { key: 'all', label: '全部', count: stoppedTasks.value.length },
+            { key: 'complete', label: '已完成', count: stoppedTasks.value.filter(task => task.status === 'complete').length },
+            { key: 'error', label: '出错', count: stoppedTasks.value.filter(task => task.status === 'error').length },
+            { key: 'removed', label: '已移除', count: stoppedTasks.value.filter(task => task.status === 'removed').length }
+        ])
         const currentList = computed(() => {
             if (currentTab.value === 'active') return activeTasks.value
             if (currentTab.value === 'waiting') return waitingTasks.value
-            return stoppedTasks.value
+            if (stoppedFilter.value === 'all') return stoppedTasks.value
+            return stoppedTasks.value.filter(task => task.status === stoppedFilter.value)
         })
         const visibleList = computed(() => {
             const keyword = searchKeyword.value.toLowerCase()
@@ -335,16 +499,69 @@ createApp({
                 return text.includes(keyword)
             })
         })
+        const displayList = computed(() => {
+            if (sortMode.value === 'default') return visibleList.value
+            const list = [...visibleList.value]
+            switch (sortMode.value) {
+                case 'name': return list.sort((a, b) => getTaskName(a).localeCompare(getTaskName(b), 'zh-CN'))
+                case 'size': return list.sort((a, b) => Number(b.totalLength) - Number(a.totalLength))
+                case 'progress': return list.sort((a, b) => Number(getProgress(b)) - Number(getProgress(a)))
+                case 'speed': return list.sort((a, b) => Number(b.downloadSpeed) - Number(a.downloadSpeed))
+                default: return list
+            }
+        })
         const canSubmit = computed(() => addMode.value === 'url' ? newUris.value.trim().length > 0 : selectedFiles.value.length > 0)
-        const isAllSelected = computed(() => visibleList.value.length > 0 && visibleList.value.every(task => selectedGids.value.has(task.gid)))
+        const isAllSelected = computed(() => displayList.value.length > 0 && displayList.value.every(task => selectedGids.value.has(task.gid)))
         const allTasks = computed(() => [...activeTasks.value, ...waitingTasks.value, ...stoppedTasks.value])
         const selectedTasks = computed(() => allTasks.value.filter(task => selectedGids.value.has(task.gid)))
         const selectedRetryableTasks = computed(() => selectedTasks.value.filter(canRetryTask))
+        const sparklinePoints = computed(() => {
+            const history = speedHistory.value
+            if (history.length < 2) return ''
+            const max = Math.max(...history, 1)
+            const step = 100 / (history.length - 1)
+            return history.map((value, index) => `${(index * step).toFixed(1)},${(27 - (value / max) * 25).toFixed(1)}`).join(' ')
+        })
+        const detailFiles = computed(() => (detailTask.value && detailTask.value.files) || [])
+        const detailUris = computed(() => detailTask.value ? getRetryUris(detailTask.value) : [])
+        const canEditFileSelection = computed(() => Boolean(
+            detailTask.value && detailTask.value.bittorrent && detailFiles.value.length > 1 &&
+            ['active', 'waiting', 'paused'].includes(detailTask.value.status)
+        ))
 
         const notify = (message, type = 'ok') => {
             toast.value = { message, type }
             window.clearTimeout(notify.timer)
             notify.timer = window.setTimeout(() => { toast.value = { message: '', type: 'ok' } }, 2600)
+        }
+        const askConfirm = (message) => new Promise(resolve => {
+            confirmState.value = { show: true, message, resolve }
+        })
+        const resolveConfirm = (accepted) => {
+            const resolve = confirmState.value.resolve
+            confirmState.value = { show: false, message: '', resolve: null }
+            if (resolve) resolve(accepted)
+        }
+
+        const copyText = async (text, label = '内容') => {
+            if (!text) return
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text)
+                } else {
+                    const textarea = document.createElement('textarea')
+                    textarea.value = text
+                    textarea.style.position = 'fixed'
+                    textarea.style.opacity = '0'
+                    document.body.appendChild(textarea)
+                    textarea.select()
+                    document.execCommand('copy')
+                    textarea.remove()
+                }
+                notify(`已复制${label}`)
+            } catch (error) {
+                notify(`复制失败：${error.message}`, 'error')
+            }
         }
 
         const clearTimers = () => {
@@ -352,6 +569,13 @@ createApp({
             if (reconnectTimer) window.clearTimeout(reconnectTimer)
             pollInterval = null
             reconnectTimer = null
+        }
+        const restartPollTimer = () => {
+            if (pollInterval) window.clearInterval(pollInterval)
+            pollInterval = null
+            if (!connected.value) return
+            const delay = document.hidden ? Math.max(HIDDEN_POLL_MS, config.value.poll * 1000) : config.value.poll * 1000
+            pollInterval = window.setInterval(sendPollRequest, delay)
         }
 
         const buildParams = (params = []) => config.value.secret ? [`token:${config.value.secret}`, ...params] : params
@@ -361,6 +585,14 @@ createApp({
                 return false
             }
             socket.send(JSON.stringify({ jsonrpc: '2.0', id, method: `aria2.${method}`, params: buildParams(params) }))
+            return true
+        }
+        const sendMulticall = (calls, id) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                notify('RPC 未连接，操作未发送', 'error')
+                return false
+            }
+            socket.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'system.multicall', params: [calls] }))
             return true
         }
 
@@ -389,8 +621,9 @@ createApp({
                 connecting.value = false
                 statusText.value = '已连接'
                 sendRpc('getVersion', [], 'sys_version')
+                sendRpc('getGlobalOption', [], 'global_option')
                 sendPollRequest()
-                pollInterval = window.setInterval(sendPollRequest, 1000)
+                restartPollTimer()
             }
 
             socket.onmessage = (event) => {
@@ -420,29 +653,52 @@ createApp({
             connecting.value = true
             statusText.value = '断开重连'
             lastError.value = message
+            document.title = 'Aria2 Manager'
             reconnectTimer = window.setTimeout(initWebSocket, RECONNECT_DELAY)
         }
 
+        const POLL_FIELDS = [
+            'gid', 'status', 'totalLength', 'completedLength', 'downloadSpeed', 'uploadSpeed',
+            'uploadLength', 'dir', 'files', 'bittorrent', 'errorCode', 'errorMessage',
+            'connections', 'numSeeders', 'seeder', 'infoHash'
+        ]
         const sendPollRequest = () => {
             if (!socket || socket.readyState !== WebSocket.OPEN) return
-            const fields = [
-                'gid', 'status', 'totalLength', 'completedLength', 'downloadSpeed', 'uploadSpeed',
-                'uploadLength', 'dir', 'files', 'bittorrent', 'errorCode', 'errorMessage',
-                'connections', 'numSeeders', 'seeder'
-            ]
             const secret = config.value.secret ? `token:${config.value.secret}` : null
             const calls = [
                 { methodName: 'aria2.getGlobalStat', params: secret ? [secret] : [] },
-                { methodName: 'aria2.tellActive', params: secret ? [secret, fields] : [fields] },
-                { methodName: 'aria2.tellWaiting', params: secret ? [secret, 0, 1000, fields] : [0, 1000, fields] },
-                { methodName: 'aria2.tellStopped', params: secret ? [secret, 0, 1000, fields] : [0, 1000, fields] }
+                { methodName: 'aria2.tellActive', params: secret ? [secret, POLL_FIELDS] : [POLL_FIELDS] },
+                { methodName: 'aria2.tellWaiting', params: secret ? [secret, 0, 1000, POLL_FIELDS] : [0, 1000, POLL_FIELDS] },
+                { methodName: 'aria2.tellStopped', params: secret ? [secret, 0, 1000, POLL_FIELDS] : [0, 1000, POLL_FIELDS] }
             ]
-            socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'poll_update', method: 'system.multicall', params: [calls] }))
+            sendMulticall(calls, 'poll_update')
+            if (detailGid.value) sendRpc('tellStatus', [detailGid.value], 'task_detail')
         }
 
+        const NOTIFICATION_LABELS = {
+            'aria2.onDownloadStart': ['任务开始下载', 'ok'],
+            'aria2.onDownloadPause': ['任务已暂停', 'ok'],
+            'aria2.onDownloadComplete': ['任务下载完成', 'ok'],
+            'aria2.onBtDownloadComplete': ['BT 任务下载完成', 'ok'],
+            'aria2.onDownloadError': ['任务下载出错', 'error']
+        }
         const unwrapMulticall = (item, fallback) => Array.isArray(item) ? item[0] : fallback
         const handleResponse = (data) => {
+            if (data.method) {
+                const [label, type] = NOTIFICATION_LABELS[data.method] || []
+                if (label) {
+                    const gid = data.params && data.params[0] && data.params[0].gid
+                    const task = gid ? allTasks.value.find(item => item.gid === gid) : null
+                    notify(task ? `${label}：${getTaskName(task)}` : label, type)
+                    sendPollRequest()
+                }
+                return
+            }
             if (data.error) {
+                if (data.id === 'task_detail') {
+                    closeDetail()
+                    return
+                }
                 notify(data.error.message || 'RPC 返回错误', 'error')
                 return
             }
@@ -452,16 +708,31 @@ createApp({
                 activeTasks.value = unwrapMulticall(resActive, []) || []
                 waitingTasks.value = unwrapMulticall(resWaiting, []) || []
                 stoppedTasks.value = unwrapMulticall(resStopped, []) || []
+                speedHistory.value = [...speedHistory.value, Number(globalStat.value.downloadSpeed) || 0].slice(-60)
+                const numActive = Number(globalStat.value.numActive) || 0
+                document.title = numActive > 0
+                    ? `↓ ${formatSize(globalStat.value.downloadSpeed)}/s · ${numActive} 个任务 - Aria2`
+                    : 'Aria2 Manager'
                 pruneSelection()
             } else if (data.id === 'sys_version' && data.result) {
                 version.value = data.result.version || ''
-            } else if (['task_action', 'batch_action', 'task_add', 'task_retry'].includes(data.id)) {
+            } else if (data.id === 'global_option' && data.result) {
+                globalLimits.value = {
+                    download: formatLimitValue(data.result['max-overall-download-limit']),
+                    upload: formatLimitValue(data.result['max-overall-upload-limit'])
+                }
+                limitForm.value = { ...globalLimits.value }
+            } else if (data.id === 'task_detail' && data.result) {
+                if (data.result.gid === detailGid.value) detailTask.value = data.result
+            } else if (data.id === 'task_option' && data.result) {
+                detailLimit.value = formatLimitValue(data.result['max-download-limit'])
+            } else if (['task_action', 'batch_action', 'task_add', 'task_retry', 'global_action'].includes(data.id)) {
                 sendPollRequest()
             }
         }
 
         const pruneSelection = () => {
-            const gids = new Set([...activeTasks.value, ...waitingTasks.value, ...stoppedTasks.value].map(task => task.gid))
+            const gids = new Set(allTasks.value.map(task => task.gid))
             for (const gid of selectedGids.value) {
                 if (!gids.has(gid)) selectedGids.value.delete(gid)
             }
@@ -476,37 +747,52 @@ createApp({
         }
         const toggleSelectAll = () => {
             if (isAllSelected.value) {
-                visibleList.value.forEach(task => selectedGids.value.delete(task.gid))
+                displayList.value.forEach(task => selectedGids.value.delete(task.gid))
             } else {
-                visibleList.value.forEach(task => selectedGids.value.add(task.gid))
+                displayList.value.forEach(task => selectedGids.value.add(task.gid))
             }
         }
         const clearSelection = () => selectedGids.value.clear()
 
+        const isStoppedStatus = (status) => ['complete', 'error', 'removed'].includes(status)
         const methodForAction = (action, task) => {
             if (action !== 'remove') return action
-            if (['active', 'waiting', 'paused'].includes(task.status)) return 'remove'
-            if (['complete', 'error', 'removed'].includes(task.status)) return 'removeDownloadResult'
-            return action
+            return isStoppedStatus(task.status) ? 'removeDownloadResult' : 'remove'
         }
-        const sendAction = (action, task) => {
-            if (action === 'remove' && !window.confirm(`删除任务「${getTaskName(task)}」？`)) return
-            if (sendRpc(methodForAction(action, task), [task.gid], 'task_action')) notify('操作已发送')
+        const sendAction = async (action, task) => {
+            if (action === 'remove') {
+                const message = isStoppedStatus(task.status)
+                    ? `删除任务记录「${getTaskName(task)}」？（不会删除磁盘文件）`
+                    : `删除任务「${getTaskName(task)}」？`
+                if (!await askConfirm(message)) return false
+            }
+            if (sendRpc(methodForAction(action, task), [task.gid], 'task_action')) {
+                notify('操作已发送')
+                return true
+            }
+            return false
         }
-        const executeBatch = (action) => {
+        const executeBatch = async (action) => {
             if (selectedGids.value.size === 0) return
             const tasks = selectedTasks.value
             const actionName = action === 'remove' ? '删除' : action === 'pause' ? '暂停' : '开始'
-            if (!window.confirm(`确定${actionName}选中的 ${tasks.length} 个任务？`)) return
+            if (!await askConfirm(`确定${actionName}选中的 ${tasks.length} 个任务？`)) return
             const calls = tasks.map(task => ({
                 methodName: `aria2.${methodForAction(action, task)}`,
                 params: buildParams([task.gid])
             }))
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'batch_action', method: 'system.multicall', params: [calls] }))
+            if (sendMulticall(calls, 'batch_action')) {
                 selectedGids.value.clear()
                 notify('批量操作已发送')
             }
+        }
+        const globalAction = async (method, message) => {
+            if (!await askConfirm(message)) return
+            if (sendRpc(method, [], 'global_action')) notify('操作已发送')
+        }
+        const purgeStopped = async () => {
+            if (!await askConfirm(`清除全部 ${stoppedTasks.value.length} 条已停止记录？（不会删除磁盘文件）`)) return
+            if (sendRpc('purgeDownloadResult', [], 'global_action')) notify('已清除停止记录')
         }
 
         const getRetryUris = (task) => {
@@ -517,6 +803,12 @@ createApp({
                 })
             })
             return uris
+        }
+        const getTaskLink = (task) => {
+            const uris = getRetryUris(task)
+            if (uris.length > 0) return uris[0]
+            if (task.infoHash) return `magnet:?xt=urn:btih:${task.infoHash}`
+            return ''
         }
         const getRetryOptions = (task) => {
             const options = {}
@@ -539,26 +831,91 @@ createApp({
                 notify(`已重新提交「${getTaskName(task)}」`)
             }
         }
-        const retrySelectedTasks = () => {
+        const retrySelectedTasks = async () => {
             const tasks = selectedRetryableTasks.value
             if (!tasks.length) return notify('选中任务中没有可重试的错误任务', 'error')
             const skipped = selectedTasks.value.length - tasks.length
-            if (!window.confirm(`确定重试选中的 ${tasks.length} 个错误任务？${skipped > 0 ? `（将跳过 ${skipped} 个不可重试任务）` : ''}`)) return
+            if (!await askConfirm(`确定重试选中的 ${tasks.length} 个错误任务？${skipped > 0 ? `（将跳过 ${skipped} 个不可重试任务）` : ''}`)) return
             const calls = tasks.map(task => ({
                 methodName: 'aria2.addUri',
                 params: buildParams([getRetryUris(task), getRetryOptions(task)])
             }))
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'task_retry', method: 'system.multicall', params: [calls] }))
+            if (sendMulticall(calls, 'task_retry')) {
                 selectedGids.value.clear()
                 notify('重试任务已提交')
-            } else {
-                notify('RPC 未连接，操作未发送', 'error')
+            }
+        }
+
+        const openDetail = (task) => {
+            detailGid.value = task.gid
+            detailTask.value = task
+            detailLimit.value = ''
+            sendRpc('tellStatus', [task.gid], 'task_detail')
+            sendRpc('getOption', [task.gid], 'task_option')
+        }
+        const closeDetail = () => {
+            detailGid.value = ''
+            detailTask.value = null
+        }
+        const removeFromDetail = async () => {
+            if (await sendAction('remove', detailTask.value)) closeDetail()
+        }
+        const getFileName = (file) => {
+            const normalized = String(file.path || '').replace(/\\/g, '/')
+            return normalized.split('/').filter(Boolean).pop() || normalized || `文件 ${file.index}`
+        }
+        const getFileProgress = (file) => {
+            const total = Number(file.length)
+            if (!total) return 0
+            return Math.min(100, (Number(file.completedLength) / total) * 100).toFixed(1)
+        }
+        const toggleFileSelection = (file) => {
+            const selected = new Set(detailFiles.value.filter(item => item.selected === 'true').map(item => item.index))
+            selected.has(file.index) ? selected.delete(file.index) : selected.add(file.index)
+            if (selected.size === 0) {
+                notify('至少需要保留一个文件', 'error')
+                sendRpc('tellStatus', [detailGid.value], 'task_detail')
+                return
+            }
+            if (sendRpc('changeOption', [detailGid.value, { 'select-file': [...selected].join(',') }], 'task_action')) {
+                notify('文件选择已更新')
+            }
+        }
+        const LIMIT_PATTERN = /^\d+(\.\d+)?[KMkm]?$/
+        const formatLimitValue = (raw) => {
+            const value = Number(raw)
+            if (!Number.isFinite(value) || value <= 0) return ''
+            if (value % 1048576 === 0) return `${value / 1048576}M`
+            if (value % 1024 === 0) return `${value / 1024}K`
+            return String(value)
+        }
+        const applyDetailLimit = () => {
+            const value = detailLimit.value.trim()
+            if (value && !LIMIT_PATTERN.test(value)) {
+                notify('限速格式无效，示例：500K、2M、0', 'error')
+                return
+            }
+            if (sendRpc('changeOption', [detailGid.value, { 'max-download-limit': value || '0' }], 'task_action')) {
+                notify(value ? `任务限速已设为 ${value}` : '已取消任务限速')
+                sendRpc('getOption', [detailGid.value], 'task_option')
             }
         }
 
         const openAddModal = () => { showAddModal.value = true }
-        const closeAddModal = () => { showAddModal.value = false }
+        const closeAddModal = () => {
+            showAddModal.value = false
+            dragOver.value = false
+        }
+        const openSettings = () => {
+            if (connected.value) sendRpc('getGlobalOption', [], 'global_option')
+            showSettings.value = true
+        }
+        const rememberDir = (dir) => {
+            if (!dir) return
+            const dirs = [dir, ...recentDirs.value.filter(item => item !== dir)].slice(0, 5)
+            recentDirs.value = dirs
+            storage.setItem('aria2_recent_dirs', JSON.stringify(dirs))
+        }
         const getAria2Options = () => {
             const options = {}
             if (taskOptions.value.dir) options.dir = taskOptions.value.dir
@@ -585,6 +942,7 @@ createApp({
         const executeAddTask = () => {
             if (!canSubmit.value) return
             const options = getAria2Options()
+            rememberDir(taskOptions.value.dir)
             if (addMode.value === 'url') {
                 const uris = newUris.value.split(/\r?\n/).map(normalizeUriInput).filter(Boolean)
                 let optionWarning = false
@@ -606,38 +964,64 @@ createApp({
                     const reader = new FileReader()
                     reader.onload = (event) => {
                         const base64 = String(event.target.result).split(',')[1]
-                        if (!sendRpc('addTorrent', [base64, [], options], 'task_add')) failed += 1
+                        const isMetalink = /\.(metalink|meta4)$/i.test(file.name)
+                        const sent = isMetalink
+                            ? sendRpc('addMetalink', [base64, options], 'task_add')
+                            : sendRpc('addTorrent', [base64, [], options], 'task_add')
+                        if (!sent) failed += 1
                         completed += 1
                         if (completed === files.length) {
                             selectedFiles.value = []
                             closeAddModal()
-                            notify(failed ? `${files.length - failed} 个种子已提交，${failed} 个失败` : `已提交 ${files.length} 个种子任务`, failed ? 'error' : 'ok')
+                            notify(failed ? `${files.length - failed} 个文件已提交，${failed} 个失败` : `已提交 ${files.length} 个任务`, failed ? 'error' : 'ok')
                         }
                     }
                     reader.onerror = () => {
                         failed += 1
                         completed += 1
-                        if (completed === files.length) notify(`${files.length - failed} 个种子已提交，${failed} 个读取失败`, 'error')
+                        if (completed === files.length) notify(`${files.length - failed} 个文件已提交，${failed} 个读取失败`, 'error')
                     }
                     reader.readAsDataURL(file)
                 })
             }
             window.setTimeout(sendPollRequest, 500)
         }
+        const acceptFiles = (fileList) => {
+            const files = Array.from(fileList || [])
+            const accepted = files.filter(file => /\.(torrent|metalink|meta4)$/i.test(file.name))
+            selectedFiles.value = accepted
+            if (files.length && accepted.length !== files.length) notify('已忽略不支持的文件类型', 'error')
+            if (!accepted.length) notify('请选择 .torrent / .metalink 文件', 'error')
+        }
         const handleFileSelect = (event) => {
-            const files = Array.from(event.target.files || [])
-            const torrents = files.filter(file => /\.torrent$/i.test(file.name))
-            selectedFiles.value = torrents
-            if (files.length && torrents.length !== files.length) notify('已忽略非 .torrent 文件', 'error')
-            if (!torrents.length) notify('请选择 .torrent 文件', 'error')
+            acceptFiles(event.target.files)
             event.target.value = ''
+        }
+        const handleFileDrop = (event) => {
+            dragOver.value = false
+            acceptFiles(event.dataTransfer && event.dataTransfer.files)
         }
 
         const saveAndReconnect = () => {
+            const limits = limitForm.value
+            for (const [label, value] of [['下载限速', limits.download], ['上传限速', limits.upload]]) {
+                if (value && !LIMIT_PATTERN.test(value)) {
+                    notify(`${label}格式无效，示例：10M、500K、0`, 'error')
+                    return
+                }
+            }
+            if (connected.value && (limits.download !== globalLimits.value.download || limits.upload !== globalLimits.value.upload)) {
+                sendRpc('changeGlobalOption', [{
+                    'max-overall-download-limit': limits.download || '0',
+                    'max-overall-upload-limit': limits.upload || '0'
+                }], 'task_action')
+                globalLimits.value = { ...limits }
+            }
             storage.setItem('aria2_host', config.value.host || 'localhost')
             storage.setItem('aria2_port', config.value.port || '6800')
             storage.setItem('aria2_secret', config.value.secret || '')
             storage.setItem('aria2_ssl', String(Boolean(config.value.ssl)))
+            storage.setItem('aria2_poll', String(config.value.poll || 1))
             showSettings.value = false
             initWebSocket()
         }
@@ -703,20 +1087,51 @@ createApp({
         }[status] || 'bg-slate-700 text-slate-300')
         const progressClass = (task) => task.status === 'error' ? 'bg-danger' : task.status === 'complete' ? 'bg-mint' : 'bg-gradient-to-r from-primary to-mint'
 
-        onMounted(initWebSocket)
+        const onKeydown = (event) => {
+            if (event.key === 'Escape') {
+                if (confirmState.value.show) resolveConfirm(false)
+                else if (showAddModal.value) closeAddModal()
+                else if (showSettings.value) showSettings.value = false
+                else if (detailGid.value) closeDetail()
+                else if (selectedGids.value.size > 0) clearSelection()
+                return
+            }
+            const tag = event.target && event.target.tagName
+            const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+            if (event.key === '/' && !typing && !showAddModal.value && !showSettings.value && !detailGid.value && !confirmState.value.show) {
+                event.preventDefault()
+                const input = document.getElementById('searchInput')
+                if (input) input.focus()
+            }
+        }
+        const onVisibilityChange = () => {
+            restartPollTimer()
+            if (!document.hidden) sendPollRequest()
+        }
+
+        onMounted(() => {
+            initWebSocket()
+            window.addEventListener('keydown', onKeydown)
+            document.addEventListener('visibilitychange', onVisibilityChange)
+        })
         onUnmounted(() => {
             clearTimers()
             closingForReconnect = true
             if (socket) socket.close()
+            window.removeEventListener('keydown', onKeydown)
+            document.removeEventListener('visibilitychange', onVisibilityChange)
         })
 
         return {
-            config, connected, connecting, version, lastError, statusText, globalStat,
-            activeTasks, waitingTasks, stoppedTasks, currentTab, tabs, currentList, visibleList,
-            searchKeyword, selectedGids, showAddModal, showSettings, addMode, newUris, selectedFiles,
-            taskOptions, toast, rpcEndpoint, canSubmit, isAllSelected, selectedRetryableTasks,
-            switchTab, toggleSelection, toggleSelectAll, clearSelection, openAddModal, closeAddModal,
-            sendAction, executeBatch, canRetryTask, retryTask, retrySelectedTasks, executeAddTask, handleFileSelect, saveAndReconnect, manualRefresh,
+            config, connected, connecting, version, lastError, statusText, globalStat, globalLimits, limitForm,
+            activeTasks, waitingTasks, stoppedTasks, currentTab, stoppedFilter, stoppedChips, tabs, currentList, displayList,
+            searchKeyword, sortMode, selectedGids, showAddModal, showSettings, addMode, dragOver, newUris, selectedFiles, recentDirs,
+            taskOptions, toast, confirmState, rpcEndpoint, canSubmit, isAllSelected, selectedRetryableTasks, sparklinePoints,
+            detailGid, detailTask, detailLimit, detailFiles, detailUris, canEditFileSelection,
+            switchTab, toggleSelection, toggleSelectAll, clearSelection, openAddModal, closeAddModal, openSettings, resolveConfirm,
+            sendAction, executeBatch, globalAction, purgeStopped, canRetryTask, retryTask, retrySelectedTasks,
+            openDetail, closeDetail, removeFromDetail, getFileName, getFileProgress, toggleFileSelection, applyDetailLimit,
+            executeAddTask, handleFileSelect, handleFileDrop, saveAndReconnect, manualRefresh, copyText, getTaskLink, isStoppedStatus,
             formatSize, getProgress, getEta, getTaskName, statusLabel, statusClass, progressClass
         }
     }
